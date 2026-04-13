@@ -1,0 +1,214 @@
+﻿@page "/"
+@rendermode InteractiveServer
+@implements IDisposable
+@inject MudClientSession Session
+@inject IOptions<MudGatewayOptions> MudGatewayOptions
+
+<PageTitle>sbclient</PageTitle>
+<script type="module" src="@Assets["Components/Pages/Home.razor.js"]"></script>
+
+<section class="mud-workspace">
+    <header class="mud-workspace__intro">
+        <div>
+            <h1>sbclient</h1>
+            <p>
+                A Blazor Web App that keeps the telnet connection on the server, renders ANSI colors in the browser,
+                and leaves room for side-channel maps or images when the MUD exposes them.
+            </p>
+        </div>
+        <div class="mud-status @(Session.ConnectionState == MudConnectionState.Error ? "mud-status--error" : null)">
+            <strong>@Session.ConnectionState</strong>
+            <span>@Session.StatusMessage</span>
+        </div>
+    </header>
+
+    @if (!string.IsNullOrWhiteSpace(Session.LastError))
+    {
+        <div class="mud-alert" role="alert">
+            @Session.LastError
+        </div>
+    }
+
+    <section class="mud-card">
+        <h2>Connection</h2>
+        <form class="mud-connection-form" @onsubmit="ConnectAsync">
+            <label>
+                Host
+                <input @bind="host" @bind:event="oninput" disabled="@ConnectDisabled" />
+            </label>
+            <label>
+                Port
+                <input type="number" min="1" max="65535" @bind="port" disabled="@ConnectDisabled" />
+            </label>
+            <div class="mud-connection-actions">
+                <button class="btn btn-primary" type="submit" disabled="@ConnectDisabled">Connect</button>
+                <button class="btn btn-outline-secondary" type="button" @onclick="DisconnectAsync" disabled="@DisconnectDisabled">Disconnect</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="mud-grid">
+        <section class="mud-card mud-card--terminal">
+            <div class="mud-card__header">
+                <h2>Terminal</h2>
+                <span>ANSI colors and Nerd Font glyphs render through the browser font stack.</span>
+            </div>
+
+            <div class="mud-terminal" data-terminal-scroll role="log" aria-live="polite">
+                @foreach (var line in Session.Lines)
+                {
+                    <div class="mud-terminal__line">
+                        @if (line.Spans.Count == 0)
+                        {
+                            <span>&nbsp;</span>
+                        }
+                        else
+                        {
+                            @foreach (var span in line.Spans)
+                            {
+                                <span style="@BuildSpanStyle(span.Style)">@span.Text</span>
+                            }
+                        }
+                    </div>
+                }
+            </div>
+
+            <form class="mud-command-form" @onsubmit="SendCommandAsync">
+                <input
+                    class="mud-command-form__input"
+                    placeholder="Type a command and press Enter"
+                    @bind="command"
+                    @bind:event="oninput"
+                    disabled="@SendDisabled" />
+                <button class="btn btn-primary" type="submit" disabled="@SendDisabled">Send</button>
+            </form>
+        </section>
+
+        <section class="mud-card mud-card--media">
+            <div class="mud-card__header">
+                <h2>Rich content channel</h2>
+                <span>Prepared for maps, illustrations, and other non-text events.</span>
+            </div>
+
+            @if (Session.MediaItems.Count == 0)
+            {
+                <p class="mud-empty-state">
+                    No decoded media events yet. When the MUD starts sending side-channel payloads, they can be decoded into cards here.
+                </p>
+            }
+            else
+            {
+                <div class="mud-media-list">
+                    @foreach (var item in Session.MediaItems)
+                    {
+                        <article class="mud-media-card">
+                            <div class="mud-media-card__meta">@item.Kind</div>
+                            <h3>@item.Title</h3>
+                            @if (!string.IsNullOrWhiteSpace(item.Source))
+                            {
+                                <p><a href="@item.Source" target="_blank" rel="noreferrer">@item.Source</a></p>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(item.Description))
+                            {
+                                <p>@item.Description</p>
+                            }
+                        </article>
+                    }
+                </div>
+            }
+
+            <div class="mud-observations">
+                <h3>Observed side-channel frames</h3>
+                @if (Session.ObservedSideChannels.Count == 0)
+                {
+                    <p class="mud-empty-state">No telnet subnegotiation frames observed yet.</p>
+                }
+                else
+                {
+                    <ul>
+                        @foreach (var observation in Session.ObservedSideChannels)
+                        {
+                            <li>@observation</li>
+                        }
+                    </ul>
+                }
+            </div>
+        </section>
+    </section>
+</section>
+
+@code {
+    private string host = string.Empty;
+    private int port;
+    private string command = string.Empty;
+    private bool ConnectDisabled => Session.IsConnected || Session.IsConnecting;
+    private bool DisconnectDisabled => !Session.IsConnected && !Session.IsConnecting;
+    private bool SendDisabled => !Session.IsConnected;
+
+    protected override void OnInitialized()
+    {
+        var defaults = MudGatewayOptions.Value;
+        host = defaults.Host;
+        port = defaults.Port;
+        Session.Changed += HandleSessionChanged;
+    }
+
+    public void Dispose()
+    {
+        Session.Changed -= HandleSessionChanged;
+    }
+
+    private async Task ConnectAsync()
+    {
+        await Session.ConnectAsync(host, port);
+    }
+
+    private async Task DisconnectAsync()
+    {
+        await Session.DisconnectAsync();
+    }
+
+    private async Task SendCommandAsync()
+    {
+        if (string.IsNullOrWhiteSpace(command))
+        {
+            return;
+        }
+
+        var nextCommand = command;
+        command = string.Empty;
+        await Session.SendCommandAsync(nextCommand);
+    }
+
+    private void HandleSessionChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private static string BuildSpanStyle(TerminalStyle style)
+    {
+        var parts = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(style.Foreground))
+        {
+            parts.Add($"color: {style.Foreground}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(style.Background))
+        {
+            parts.Add($"background-color: {style.Background}");
+        }
+
+        if (style.Bold)
+        {
+            parts.Add("font-weight: 700");
+        }
+
+        if (style.Underline)
+        {
+            parts.Add("text-decoration: underline");
+        }
+
+        return string.Join("; ", parts);
+    }
+}
