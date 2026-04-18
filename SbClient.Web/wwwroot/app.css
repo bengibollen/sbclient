@@ -1,3 +1,14 @@
+@font-face {
+    font-family: "SbClientFiraCodeNerd";
+    src:
+        local("FiraCode Nerd Font"),
+        local("FiraCodeNerdFont-Regular"),
+        url("/fonts/FiraCodeNerdFont-Regular.woff2") format("woff2");
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+
 :root {
     color-scheme: dark;
     --app-bg: #0f172a;
@@ -48,6 +59,10 @@ a, .btn-link {
 }
 
 .brand-shell {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
     max-width: 1440px;
     margin: 0 auto;
     padding: 1rem 1.5rem;
@@ -63,6 +78,27 @@ a, .btn-link {
 .brand-shell__subtitle {
     margin: 0.25rem 0 0;
     color: var(--panel-muted);
+}
+
+.brand-shell__nav {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.brand-shell__nav-link {
+    color: var(--panel-text);
+    text-decoration: none;
+    padding: 0.45rem 0.8rem;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.82);
+}
+
+.brand-shell__nav-link.active {
+    color: #08111c;
+    background: var(--accent);
+    border-color: var(--accent);
 }
 
 .mud-workspace {
@@ -118,6 +154,28 @@ a, .btn-link {
 
 .mud-status strong {
     color: #f8fafc;
+}
+
+.mud-learning-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+    gap: 1rem;
+}
+
+.mud-learning-metadata {
+    display: grid;
+    gap: 0.35rem;
+    color: var(--panel-muted);
+}
+
+.mud-learning-metadata strong {
+    color: #f8fafc;
+}
+
+.mud-learning-actions {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
 }
 
 .mud-status--error {
@@ -185,7 +243,7 @@ a, .btn-link {
     border-radius: 14px;
     border: 1px solid rgba(148, 163, 184, 0.15);
     background: #020617;
-    font-family: "JetBrainsMono Nerd Font", "FiraCode Nerd Font", "CaskaydiaCove Nerd Font", "Cascadia Code", Consolas, monospace;
+    font-family: "SbClientFiraCodeNerd", "JetBrainsMono Nerd Font", "FiraCode Nerd Font", "CaskaydiaCove Nerd Font", "Cascadia Code", Consolas, monospace;
     white-space: pre-wrap;
     word-break: break-word;
 }

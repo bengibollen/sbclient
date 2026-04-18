@@ -1,4 +1,6 @@
 <Solution>
+  <Project Path="SbClient.Web.Client/SbClient.Web.Client.csproj" />
+  <Project Path="SbClient.Web.Contracts/SbClient.Web.Contracts.csproj" />
   <Project Path="SbClient.Web.Tests/SbClient.Web.Tests.csproj" />
   <Project Path="SbClient.Web/SbClient.Web.csproj" />
 </Solution>

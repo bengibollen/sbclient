@@ -1,0 +1,105 @@
+@page "/wasm-learning"
+@rendermode PageRenderMode
+@inject HttpClient Http
+
+<PageTitle>WASM learning</PageTitle>
+
+<section class="mud-workspace">
+    <header class="mud-workspace__intro">
+        <div>
+            <h1>WebAssembly learning page</h1>
+            <p>
+                This component runs in the browser through Blazor WebAssembly. It keeps a small piece of local state
+                in memory and calls a server endpoint for browser-safe data so you can compare both sides of the app.
+            </p>
+        </div>
+        <div class="mud-status">
+            <strong>Interactive WebAssembly</strong>
+            <span>Client-side component code with an HTTP call back to the ASP.NET Core host.</span>
+        </div>
+    </header>
+
+    <section class="mud-learning-grid">
+        <article class="mud-card">
+            <div class="mud-card__header">
+                <h2>Browser-only state</h2>
+                <span>No server round-trip required.</span>
+            </div>
+
+            <div class="mud-learning-metadata">
+                <div><strong>Local clicks:</strong> @localClicks</div>
+                <div><strong>Last local update:</strong> @(lastLocalUpdate?.ToString("u") ?? "Not clicked yet")</div>
+            </div>
+
+            <div class="mud-learning-actions">
+                <button class="btn btn-primary" type="button" @onclick="IncrementLocalCounter">Increment locally</button>
+            </div>
+        </article>
+
+        <article class="mud-card">
+            <div class="mud-card__header">
+                <h2>Server API snapshot</h2>
+                <span>Loaded from <code>/api/learning/browser-boundary</code>.</span>
+            </div>
+
+            @if (snapshot is null)
+            {
+                <p class="mud-empty-state">Loading the first server snapshot...</p>
+            }
+            else
+            {
+                <div class="mud-learning-metadata">
+                    <div><strong>Generated on server:</strong> @snapshot.GeneratedAtUtc.ToString("u")</div>
+                    <div><strong>Default MUD host:</strong> @snapshot.DefaultHost</div>
+                    <div><strong>Default MUD port:</strong> @snapshot.DefaultPort</div>
+                    <div><strong>Browser role:</strong> @snapshot.BrowserWorkDescription</div>
+                    <div><strong>Server role:</strong> @snapshot.ServerWorkDescription</div>
+                </div>
+            }
+
+            <div class="mud-learning-actions">
+                <button class="btn btn-outline-secondary" type="button" @onclick="LoadSnapshotAsync" disabled="@isLoading">
+                    @(isLoading ? "Refreshing..." : "Refresh from server")
+                </button>
+            </div>
+        </article>
+    </section>
+</section>
+
+@code {
+    private static readonly IComponentRenderMode PageRenderMode = new InteractiveWebAssemblyRenderMode(prerender: false);
+
+    private BrowserLearningSnapshot? snapshot;
+    private int localClicks;
+    private DateTimeOffset? lastLocalUpdate;
+    private bool isLoading;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadSnapshotAsync();
+    }
+
+    private void IncrementLocalCounter()
+    {
+        localClicks++;
+        lastLocalUpdate = DateTimeOffset.Now;
+    }
+
+    private async Task LoadSnapshotAsync()
+    {
+        isLoading = true;
+
+        try
+        {
+            using var response = await Http.GetAsync("api/learning/browser-boundary");
+            response.EnsureSuccessStatusCode();
+
+            snapshot = await response.Content.ReadFromJsonAsync<BrowserLearningSnapshot>()
+                ?? throw new InvalidOperationException("The server returned an empty learning snapshot.");
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+}
