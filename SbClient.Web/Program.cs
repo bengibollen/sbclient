@@ -6,21 +6,16 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddRazorComponents()
-    .AddInteractiveServerComponents()
-    .AddInteractiveWebAssemblyComponents();
+    .AddInteractiveServerComponents();
 builder.Services.Configure<MudGatewayOptions>(builder.Configuration.GetSection(MudGatewayOptions.SectionName));
 builder.Services.AddScoped<IMudSideChannelDecoder, NoopMudSideChannelDecoder>();
+builder.Services.AddScoped<MudTelnetClient>();
 builder.Services.AddScoped<MudClientSession>();
-builder.Services.AddScoped<BrowserLearningSnapshotFactory>();
 
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
-{
-    app.UseWebAssemblyDebugging();
-}
-else
+if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
     // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
@@ -31,12 +26,8 @@ app.UseHttpsRedirection();
 
 app.UseAntiforgery();
 
-app.MapGet("/api/learning/browser-boundary", (BrowserLearningSnapshotFactory factory) => factory.Create());
-
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode()
-    .AddInteractiveWebAssemblyRenderMode()
-    .AddAdditionalAssemblies(typeof(SbClient.Web.Client._Imports).Assembly);
+    .AddInteractiveServerRenderMode();
 
 app.Run();

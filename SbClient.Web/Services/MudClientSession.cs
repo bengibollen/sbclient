@@ -9,6 +9,7 @@ namespace SbClient.Web.Services;
 public sealed class MudClientSession : IAsyncDisposable
 {
     private readonly IMudSideChannelDecoder _sideChannelDecoder;
+    private readonly MudTelnetClient _telnetClient;
     private readonly ILogger<MudClientSession> _logger;
     private readonly MudGatewayOptions _options;
     private readonly TelnetFrameParser _frameParser = new();
@@ -25,12 +26,15 @@ public sealed class MudClientSession : IAsyncDisposable
 
     public MudClientSession(
         IMudSideChannelDecoder sideChannelDecoder,
+        MudTelnetClient telnetClient,
         IOptions<MudGatewayOptions> options,
         ILogger<MudClientSession> logger)
     {
         _sideChannelDecoder = sideChannelDecoder;
+        _telnetClient = telnetClient;
         _logger = logger;
         _options = options.Value;
+        _telnetClient.RemoteEchoChanged += HandleRemoteEchoChanged;
     }
 
     public event Action? Changed;
@@ -40,6 +44,8 @@ public sealed class MudClientSession : IAsyncDisposable
     public string StatusMessage { get; private set; } = "Disconnected";
 
     public string? LastError { get; private set; }
+
+    public bool IsInputHidden { get; private set; }
 
     public IReadOnlyList<TerminalLine> Lines => _lines;
 
@@ -81,6 +87,7 @@ public sealed class MudClientSession : IAsyncDisposable
             await _tcpClient.ConnectAsync(host, port, _readerCancellation.Token);
 
             _stream = _tcpClient.GetStream();
+            await _telnetClient.AttachAsync(_stream, _readerCancellation.Token);
             ConnectionState = MudConnectionState.Connected;
             StatusMessage = $"Connected to {host}:{port}";
             NotifyChanged();
@@ -128,13 +135,14 @@ public sealed class MudClientSession : IAsyncDisposable
             return;
         }
 
-        AppendTranscript($"> {command}\n");
+        if (!IsInputHidden)
+        {
+            AppendTranscript($"> {command}\n");
+        }
 
         try
         {
-            var payload = Encoding.UTF8.GetBytes($"{command}\n");
-            await _stream.WriteAsync(payload, cancellationToken);
-            await _stream.FlushAsync(cancellationToken);
+            await _telnetClient.SendAsync(command, cancellationToken);
         }
         catch (IOException exception)
         {
@@ -152,6 +160,7 @@ public sealed class MudClientSession : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        _telnetClient.RemoteEchoChanged -= HandleRemoteEchoChanged;
         await DisconnectAsync();
         _stateGate.Dispose();
     }
@@ -184,15 +193,13 @@ public sealed class MudClientSession : IAsyncDisposable
                     return;
                 }
 
-                var result = _frameParser.Process(buffer.AsSpan(0, read));
+                var receivedBuffer = buffer.AsMemory(0, read);
+                await _telnetClient.InterpretAsync(receivedBuffer, cancellationToken);
+
+                var result = _frameParser.Process(receivedBuffer.Span);
                 if (!string.IsNullOrEmpty(result.Text))
                 {
                     AppendTranscript(result.Text);
-                }
-
-                foreach (var response in result.NegotiationResponses)
-                {
-                    await _stream.WriteAsync(response, cancellationToken);
                 }
 
                 foreach (var subnegotiation in result.Subnegotiations)
@@ -257,6 +264,13 @@ public sealed class MudClientSession : IAsyncDisposable
         _observedSideChannels.Clear();
         _lines = [new TerminalLine([])];
         LastError = null;
+        IsInputHidden = false;
+    }
+
+    private void HandleRemoteEchoChanged(bool isEchoEnabled)
+    {
+        IsInputHidden = !isEchoEnabled;
+        NotifyChanged();
     }
 
     private void SetErrorState(string statusMessage, string errorMessage)
@@ -272,6 +286,7 @@ public sealed class MudClientSession : IAsyncDisposable
     private async Task CleanupConnectionAsync(bool awaitReaderTask = true)
     {
         _readerCancellation?.Cancel();
+        await _telnetClient.DisposeAsync();
 
         if (_stream is not null)
         {

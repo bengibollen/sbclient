@@ -59,10 +59,6 @@ a, .btn-link {
 }
 
 .brand-shell {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 1rem;
     max-width: 1440px;
     margin: 0 auto;
     padding: 1rem 1.5rem;
@@ -78,27 +74,6 @@ a, .btn-link {
 .brand-shell__subtitle {
     margin: 0.25rem 0 0;
     color: var(--panel-muted);
-}
-
-.brand-shell__nav {
-    display: flex;
-    gap: 0.75rem;
-    flex-wrap: wrap;
-}
-
-.brand-shell__nav-link {
-    color: var(--panel-text);
-    text-decoration: none;
-    padding: 0.45rem 0.8rem;
-    border: 1px solid rgba(148, 163, 184, 0.22);
-    border-radius: 999px;
-    background: rgba(15, 23, 42, 0.82);
-}
-
-.brand-shell__nav-link.active {
-    color: #08111c;
-    background: var(--accent);
-    border-color: var(--accent);
 }
 
 .mud-workspace {
@@ -222,34 +197,50 @@ a, .btn-link {
     display: grid;
     grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr);
     gap: 1.5rem;
+    align-items: stretch;
 }
 
 .mud-card--terminal,
 .mud-card--media {
-    min-height: 32rem;
+    min-height: 0;
+    height: clamp(28rem, 60vh, 40rem);
 }
 
 .mud-card--terminal {
     display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
     gap: 1rem;
 }
 
 .mud-terminal {
-    flex: 1;
-    min-height: 24rem;
-    max-height: 60vh;
+    min-height: 0;
+    height: 100%;
     overflow: auto;
     padding: 1rem;
+    padding-bottom: 1.25rem;
     border-radius: 14px;
     border: 1px solid rgba(148, 163, 184, 0.15);
     background: #020617;
     font-family: "SbClientFiraCodeNerd", "JetBrainsMono Nerd Font", "FiraCode Nerd Font", "CaskaydiaCove Nerd Font", "Cascadia Code", Consolas, monospace;
     white-space: pre-wrap;
     word-break: break-word;
+    scroll-padding-block-end: 1rem;
+}
+
+.mud-terminal__content {
+    min-height: 100%;
 }
 
 .mud-terminal__line {
     min-height: 1.35rem;
+}
+
+.mud-terminal__end {
+    height: 0.25rem;
+}
+
+.mud-card--media {
+    overflow: auto;
 }
 
 .mud-media-list {
@@ -306,6 +297,12 @@ a, .btn-link {
 @media (max-width: 1080px) {
     .mud-grid {
         grid-template-columns: 1fr;
+    }
+
+    .mud-card--terminal,
+    .mud-card--media {
+        height: auto;
+        min-height: 28rem;
     }
 
     .mud-workspace__intro {

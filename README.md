@@ -8,15 +8,9 @@ The first implementation slice uses a **Blazor Web App**:
 
 - the browser renders the terminal UI, command input, and future media area
 - the ASP.NET Core server owns the TCP/telnet connection to the MUD
-- telnet negotiation and subnegotiation frames are separated from plain text before rendering
+- TelnetNegotiationCore handles telnet negotiation while transcript parsing still separates side-channel subnegotiation frames from plain text before rendering
 - ANSI color sequences are rendered into styled terminal spans
 - a side-channel decoder boundary is in place for future maps, images, and other non-text payloads
-
-The app now also includes a small **Interactive WebAssembly** learning page at `/wasm-learning`:
-
-- `/` remains the reference **Interactive Server** page and talks directly to `MudClientSession`
-- `/wasm-learning` runs its component code in the browser and fetches a small browser-safe snapshot from `/api/learning/browser-boundary`
-- the MUD TCP/telnet connection still stays on the server
 - the terminal bundles a compressed FiraCode Nerd Font fallback from `SbClient.Web/wwwroot/fonts/` so glyphs still render when no Nerd Font is installed locally
 
 ## Local development

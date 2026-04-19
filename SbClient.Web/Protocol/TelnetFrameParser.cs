@@ -4,33 +4,29 @@ namespace SbClient.Web.Protocol;
 
 public sealed class TelnetFrameParser
 {
-    private const byte Iac = 255;
-    private const byte Dont = 254;
-    private const byte Do = 253;
-    private const byte Wont = 252;
-    private const byte Will = 251;
-    private const byte Sb = 250;
-    private const byte Se = 240;
-
     private readonly Decoder _decoder = Encoding.UTF8.GetDecoder();
     private readonly List<byte> _textBuffer = [];
     private readonly List<byte> _subnegotiationPayload = [];
+    private readonly TelnetOptionStateTracker _optionState = new();
 
     private ParserState _state = ParserState.Text;
     private byte _pendingCommand;
     private byte _subnegotiationOption;
 
+    public TelnetOptionStateTracker OptionState => _optionState;
+
     public TelnetProcessResult Process(ReadOnlySpan<byte> buffer)
     {
         var subnegotiations = new List<TelnetSubnegotiationMessage>();
         var responses = new List<byte[]>();
+        var negotiations = new List<TelnetNegotiationMessage>();
 
         foreach (var current in buffer)
         {
             switch (_state)
             {
                 case ParserState.Text:
-                    if (current == Iac)
+                    if (current == TelnetCommands.Iac)
                     {
                         _state = ParserState.Command;
                     }
@@ -43,18 +39,18 @@ public sealed class TelnetFrameParser
                 case ParserState.Command:
                     switch (current)
                     {
-                        case Iac:
-                            _textBuffer.Add(Iac);
+                        case TelnetCommands.Iac:
+                            _textBuffer.Add(TelnetCommands.Iac);
                             _state = ParserState.Text;
                             break;
-                        case Do:
-                        case Dont:
-                        case Will:
-                        case Wont:
+                        case TelnetCommands.Do:
+                        case TelnetCommands.Dont:
+                        case TelnetCommands.Will:
+                        case TelnetCommands.Wont:
                             _pendingCommand = current;
                             _state = ParserState.NegotiationOption;
                             break;
-                        case Sb:
+                        case TelnetCommands.Sb:
                             _state = ParserState.SubnegotiationOption;
                             break;
                         default:
@@ -64,15 +60,7 @@ public sealed class TelnetFrameParser
                     break;
 
                 case ParserState.NegotiationOption:
-                    if (_pendingCommand == Do)
-                    {
-                        responses.Add([Iac, Wont, current]);
-                    }
-                    else if (_pendingCommand == Will)
-                    {
-                        responses.Add([Iac, Dont, current]);
-                    }
-
+                    HandleNegotiation(responses, negotiations, current);
                     _state = ParserState.Text;
                     break;
 
@@ -83,7 +71,7 @@ public sealed class TelnetFrameParser
                     break;
 
                 case ParserState.Subnegotiation:
-                    if (current == Iac)
+                    if (current == TelnetCommands.Iac)
                     {
                         _state = ParserState.SubnegotiationIac;
                     }
@@ -94,7 +82,7 @@ public sealed class TelnetFrameParser
                     break;
 
                 case ParserState.SubnegotiationIac:
-                    if (current == Se)
+                    if (current == TelnetCommands.Se)
                     {
                         subnegotiations.Add(new TelnetSubnegotiationMessage(
                             _subnegotiationOption,
@@ -103,9 +91,9 @@ public sealed class TelnetFrameParser
                         _subnegotiationPayload.Clear();
                         _state = ParserState.Text;
                     }
-                    else if (current == Iac)
+                    else if (current == TelnetCommands.Iac)
                     {
-                        _subnegotiationPayload.Add(Iac);
+                        _subnegotiationPayload.Add(TelnetCommands.Iac);
                         _state = ParserState.Subnegotiation;
                     }
                     else
@@ -116,7 +104,7 @@ public sealed class TelnetFrameParser
             }
         }
 
-        return new TelnetProcessResult(DecodePendingText(), subnegotiations, responses);
+        return new TelnetProcessResult(DecodePendingText(), subnegotiations, responses, negotiations);
     }
 
     public void Reset()
@@ -124,6 +112,7 @@ public sealed class TelnetFrameParser
         _decoder.Reset();
         _textBuffer.Clear();
         _subnegotiationPayload.Clear();
+        _optionState.Reset();
         _state = ParserState.Text;
         _pendingCommand = 0;
         _subnegotiationOption = 0;
@@ -144,6 +133,76 @@ public sealed class TelnetFrameParser
 
         return new string(chars);
     }
+
+    private void HandleNegotiation(
+        List<byte[]> responses,
+        List<TelnetNegotiationMessage> negotiations,
+        byte optionCode)
+    {
+        negotiations.Add(new TelnetNegotiationMessage(_pendingCommand, optionCode, DateTimeOffset.UtcNow));
+
+        switch (_pendingCommand)
+        {
+            case TelnetCommands.Will:
+                HandleRemoteOptionRequest(responses, optionCode, IsSupportedRemoteOption(optionCode));
+                return;
+            case TelnetCommands.Wont:
+                HandleRemoteOptionDisable(responses, optionCode);
+                return;
+            case TelnetCommands.Do:
+                HandleLocalOptionRequest(responses, optionCode, IsSupportedLocalOption(optionCode));
+                return;
+            case TelnetCommands.Dont:
+                HandleLocalOptionDisable(responses, optionCode);
+                return;
+        }
+    }
+
+    private void HandleRemoteOptionRequest(List<byte[]> responses, byte optionCode, bool accepted)
+    {
+        if (_optionState.GetRemoteOptionState(optionCode) != accepted)
+        {
+            responses.Add([TelnetCommands.Iac, accepted ? TelnetCommands.Do : TelnetCommands.Dont, optionCode]);
+        }
+
+        _optionState.SetRemoteOptionState(optionCode, accepted);
+    }
+
+    private void HandleRemoteOptionDisable(List<byte[]> responses, byte optionCode)
+    {
+        if (_optionState.GetRemoteOptionState(optionCode) != false)
+        {
+            responses.Add([TelnetCommands.Iac, TelnetCommands.Dont, optionCode]);
+        }
+
+        _optionState.SetRemoteOptionState(optionCode, false);
+    }
+
+    private void HandleLocalOptionRequest(List<byte[]> responses, byte optionCode, bool accepted)
+    {
+        if (_optionState.GetLocalOptionState(optionCode) != accepted)
+        {
+            responses.Add([TelnetCommands.Iac, accepted ? TelnetCommands.Will : TelnetCommands.Wont, optionCode]);
+        }
+
+        _optionState.SetLocalOptionState(optionCode, accepted);
+    }
+
+    private void HandleLocalOptionDisable(List<byte[]> responses, byte optionCode)
+    {
+        if (_optionState.GetLocalOptionState(optionCode) != false)
+        {
+            responses.Add([TelnetCommands.Iac, TelnetCommands.Wont, optionCode]);
+        }
+
+        _optionState.SetLocalOptionState(optionCode, false);
+    }
+
+    private static bool IsSupportedRemoteOption(byte optionCode)
+        => optionCode is TelnetOptions.Echo or TelnetOptions.SuppressGoAhead;
+
+    private static bool IsSupportedLocalOption(byte optionCode)
+        => optionCode == TelnetOptions.SuppressGoAhead;
 
     private enum ParserState
     {

@@ -1,48 +1,56 @@
 const stickThreshold = 24;
+const trackedTerminals = new WeakMap();
 
-for (const terminal of document.querySelectorAll("[data-terminal-scroll]")) {
-    setupTerminalAutoScroll(terminal);
+function updateStickiness(terminal, state) {
+    const distanceFromBottom = terminal.scrollHeight - terminal.clientHeight - terminal.scrollTop;
+    state.shouldStickToBottom = distanceFromBottom <= stickThreshold;
 }
 
-function setupTerminalAutoScroll(terminal) {
-    if (terminal.dataset.scrollObserverAttached === "true") {
+function ensureTerminalState(terminal) {
+    let state = trackedTerminals.get(terminal);
+    if (state) {
+        return state;
+    }
+
+    state = {
+        shouldStickToBottom: true
+    };
+
+    state.handleScroll = () => {
+        updateStickiness(terminal, state);
+    };
+
+    terminal.addEventListener("scroll", state.handleScroll, {
+        passive: true
+    });
+
+    trackedTerminals.set(terminal, state);
+    updateStickiness(terminal, state);
+    return state;
+}
+
+function scrollToBottom(terminal) {
+    terminal.scrollTop = terminal.scrollHeight;
+}
+
+export function syncTerminalScroll(terminal) {
+    if (!terminal) {
         return;
     }
 
-    terminal.dataset.scrollObserverAttached = "true";
+    const state = ensureTerminalState(terminal);
+    if (!state.shouldStickToBottom) {
+        return;
+    }
 
-    let shouldStickToBottom = true;
-
-    const updateStickiness = () => {
-        const distanceFromBottom = terminal.scrollHeight - terminal.clientHeight - terminal.scrollTop;
-        shouldStickToBottom = distanceFromBottom <= stickThreshold;
-    };
-
-    const scrollToBottom = () => {
-        terminal.scrollTop = terminal.scrollHeight;
-    };
-
-    terminal.addEventListener("scroll", updateStickiness);
-
-    const observer = new MutationObserver(() => {
-        if (!shouldStickToBottom) {
-            return;
-        }
-
-        requestAnimationFrame(scrollToBottom);
-    });
-
-    observer.observe(terminal, {
-        childList: true,
-        subtree: true,
-        characterData: true
-    });
+    scrollToBottom(terminal);
 
     requestAnimationFrame(() => {
-        updateStickiness();
+        scrollToBottom(terminal);
 
-        if (shouldStickToBottom) {
-            scrollToBottom();
-        }
+        requestAnimationFrame(() => {
+            scrollToBottom(terminal);
+            setTimeout(() => scrollToBottom(terminal), 0);
+        });
     });
 }
