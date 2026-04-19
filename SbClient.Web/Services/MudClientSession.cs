@@ -12,6 +12,7 @@ public sealed class MudClientSession : IAsyncDisposable
     private readonly MudTelnetClient _telnetClient;
     private readonly ILogger<MudClientSession> _logger;
     private readonly MudGatewayOptions _options;
+    private readonly TelnetEchoStateResolver _echoStateResolver = new();
     private readonly TelnetFrameParser _frameParser = new();
     private readonly StringBuilder _transcript = new();
     private readonly List<MudMediaItem> _mediaItems = [];
@@ -216,6 +217,8 @@ public sealed class MudClientSession : IAsyncDisposable
                     }
                 }
 
+                _echoStateResolver.ApplyNegotiations(result.Negotiations);
+                UpdateInputHiddenState();
                 NotifyChanged();
             }
         }
@@ -264,14 +267,17 @@ public sealed class MudClientSession : IAsyncDisposable
         _observedSideChannels.Clear();
         _lines = [new TerminalLine([])];
         LastError = null;
-        IsInputHidden = false;
+        _echoStateResolver.Reset();
+        UpdateInputHiddenState();
     }
 
     private void HandleRemoteEchoChanged(bool isEchoEnabled)
     {
-        IsInputHidden = !isEchoEnabled;
-        NotifyChanged();
+        _echoStateResolver.ApplyRemoteEchoState(isEchoEnabled);
+        UpdateInputHiddenState();
     }
+
+    private void UpdateInputHiddenState() => IsInputHidden = _echoStateResolver.IsInputHidden;
 
     private void SetErrorState(string statusMessage, string errorMessage)
     {
