@@ -123,12 +123,24 @@ a, .btn-link {
 .mud-status {
     min-width: 16rem;
     padding: 0.9rem 1rem;
-    display: grid;
-    gap: 0.2rem;
+    display: flex;
+    align-items: start;
+    justify-content: space-between;
+    gap: 1rem;
 }
 
 .mud-status strong {
     color: #f8fafc;
+}
+
+.mud-status__summary {
+    display: grid;
+    gap: 0.2rem;
+}
+
+.mud-status__action {
+    flex-shrink: 0;
+    align-self: center;
 }
 
 .mud-learning-grid {
@@ -188,6 +200,10 @@ a, .btn-link {
     color: var(--panel-text);
 }
 
+.mud-command-form__input {
+    font-family: "SbClientFiraCodeNerd", "JetBrainsMono Nerd Font", "FiraCode Nerd Font", "CaskaydiaCove Nerd Font", "Cascadia Code", Consolas, monospace;
+}
+
 .mud-connection-actions {
     display: flex;
     gap: 0.75rem;
@@ -212,19 +228,29 @@ a, .btn-link {
     gap: 1rem;
 }
 
+.mud-terminal-surface {
+    min-height: 0;
+    height: 100%;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    border-radius: 14px;
+    border: 1px solid rgba(148, 163, 184, 0.15);
+    background: #020617;
+    overflow: hidden;
+    box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.04);
+}
+
 .mud-terminal {
     min-height: 0;
     height: 100%;
     overflow: auto;
     padding: 1rem;
     padding-bottom: 1.25rem;
-    border-radius: 14px;
-    border: 1px solid rgba(148, 163, 184, 0.15);
-    background: #020617;
     font-family: "SbClientFiraCodeNerd", "JetBrainsMono Nerd Font", "FiraCode Nerd Font", "CaskaydiaCove Nerd Font", "Cascadia Code", Consolas, monospace;
     white-space: pre-wrap;
     word-break: break-word;
     scroll-padding-block-end: 1rem;
+    cursor: text;
 }
 
 .mud-terminal__content {
@@ -273,6 +299,31 @@ a, .btn-link {
 
 .mud-command-form {
     align-items: center;
+    gap: 0.65rem;
+    padding: 0.8rem 0.9rem 0.9rem;
+    border-top: 1px solid rgba(148, 163, 184, 0.14);
+    background: linear-gradient(180deg, rgba(2, 6, 23, 0.92) 0%, rgba(2, 6, 23, 0.98) 100%);
+}
+
+.mud-command-form__input {
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 10px;
+    background: rgba(15, 23, 42, 0.72);
+    box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.04);
+}
+
+.mud-command-form__input::placeholder {
+    color: rgba(148, 163, 184, 0.8);
+}
+
+.mud-command-form__input:focus {
+    outline: none;
+    border-color: rgba(56, 189, 248, 0.65);
+    box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.2);
+}
+
+.mud-command-form__send {
+    min-width: 5.25rem;
 }
 
 #blazor-error-ui {

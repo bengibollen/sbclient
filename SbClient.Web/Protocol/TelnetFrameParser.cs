@@ -17,6 +17,7 @@ public sealed class TelnetFrameParser
 
     public TelnetProcessResult Process(ReadOnlySpan<byte> buffer)
     {
+        var textSegments = new List<TelnetTextSegment>();
         var subnegotiations = new List<TelnetSubnegotiationMessage>();
         var responses = new List<byte[]>();
         var negotiations = new List<TelnetNegotiationMessage>();
@@ -52,6 +53,10 @@ public sealed class TelnetFrameParser
                             break;
                         case TelnetCommands.Sb:
                             _state = ParserState.SubnegotiationOption;
+                            break;
+                        case TelnetCommands.Eor:
+                            CompleteTextSegment(textSegments, endsWithPromptBoundary: true);
+                            _state = ParserState.Text;
                             break;
                         default:
                             _state = ParserState.Text;
@@ -104,7 +109,8 @@ public sealed class TelnetFrameParser
             }
         }
 
-        return new TelnetProcessResult(DecodePendingText(), subnegotiations, responses, negotiations);
+        CompleteTextSegment(textSegments, endsWithPromptBoundary: false);
+        return new TelnetProcessResult(textSegments, subnegotiations, responses, negotiations);
     }
 
     public void Reset()
@@ -132,6 +138,15 @@ public sealed class TelnetFrameParser
         _textBuffer.Clear();
 
         return new string(chars);
+    }
+
+    private void CompleteTextSegment(List<TelnetTextSegment> textSegments, bool endsWithPromptBoundary)
+    {
+        var text = DecodePendingText();
+        if (!string.IsNullOrEmpty(text) || endsWithPromptBoundary)
+        {
+            textSegments.Add(new TelnetTextSegment(text, endsWithPromptBoundary));
+        }
     }
 
     private void HandleNegotiation(
@@ -199,10 +214,10 @@ public sealed class TelnetFrameParser
     }
 
     private static bool IsSupportedRemoteOption(byte optionCode)
-        => optionCode is TelnetOptions.Echo or TelnetOptions.SuppressGoAhead;
+        => optionCode is TelnetOptions.Echo or TelnetOptions.SuppressGoAhead or TelnetOptions.EndOfRecord or TelnetOptions.Gmcp;
 
     private static bool IsSupportedLocalOption(byte optionCode)
-        => optionCode == TelnetOptions.SuppressGoAhead;
+        => optionCode is TelnetOptions.SuppressGoAhead or TelnetOptions.Naws;
 
     private enum ParserState
     {

@@ -1,5 +1,7 @@
 using System.Net.Sockets;
+using System.Reflection;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.Options;
 using SbClient.Web.Models;
 using SbClient.Web.Protocol;
@@ -13,17 +15,23 @@ public sealed class MudClientSession : IAsyncDisposable
     private readonly ILogger<MudClientSession> _logger;
     private readonly MudGatewayOptions _options;
     private readonly TelnetEchoStateResolver _echoStateResolver = new();
+    private readonly TerminalPromptTracker _promptTracker = new();
     private readonly TelnetFrameParser _frameParser = new();
     private readonly StringBuilder _transcript = new();
     private readonly List<MudMediaItem> _mediaItems = [];
     private readonly List<string> _observedSideChannels = [];
     private readonly SemaphoreSlim _stateGate = new(1, 1);
+    private static readonly string ClientVersion = ResolveClientVersion();
 
     private TcpClient? _tcpClient;
     private NetworkStream? _stream;
     private CancellationTokenSource? _readerCancellation;
     private Task? _readerTask;
     private IReadOnlyList<TerminalLine> _lines = [new TerminalLine([])];
+    private bool _gmcpHandshakeSent;
+    private int? _pendingTerminalColumns;
+    private int? _pendingTerminalRows;
+    private (int Columns, int Rows)? _lastSentTerminalSize;
 
     public MudClientSession(
         IMudSideChannelDecoder sideChannelDecoder,
@@ -138,7 +146,11 @@ public sealed class MudClientSession : IAsyncDisposable
 
         if (!IsInputHidden)
         {
-            AppendTranscript($"> {command}\n");
+            AppendTranscript(_promptTracker.BuildEchoedInput(command));
+        }
+        else
+        {
+            _promptTracker.ConsumePromptBoundary();
         }
 
         try
@@ -198,9 +210,14 @@ public sealed class MudClientSession : IAsyncDisposable
                 await _telnetClient.InterpretAsync(receivedBuffer, cancellationToken);
 
                 var result = _frameParser.Process(receivedBuffer.Span);
-                if (!string.IsNullOrEmpty(result.Text))
+                await SendManualNegotiationResponsesAsync(result.NegotiationResponses, cancellationToken);
+                foreach (var segment in result.TextSegments)
                 {
-                    AppendTranscript(result.Text);
+                    var visibleText = _promptTracker.PrepareIncomingText(segment.Text, segment.EndsWithPromptBoundary);
+                    if (!string.IsNullOrEmpty(visibleText))
+                    {
+                        AppendTranscript(visibleText);
+                    }
                 }
 
                 foreach (var subnegotiation in result.Subnegotiations)
@@ -218,6 +235,7 @@ public sealed class MudClientSession : IAsyncDisposable
                 }
 
                 _echoStateResolver.ApplyNegotiations(result.Negotiations);
+                await EnsureNegotiatedCapabilitiesAsync(cancellationToken);
                 UpdateInputHiddenState();
                 NotifyChanged();
             }
@@ -268,6 +286,9 @@ public sealed class MudClientSession : IAsyncDisposable
         _lines = [new TerminalLine([])];
         LastError = null;
         _echoStateResolver.Reset();
+        _promptTracker.Reset();
+        _gmcpHandshakeSent = false;
+        _lastSentTerminalSize = null;
         UpdateInputHiddenState();
     }
 
@@ -279,6 +300,24 @@ public sealed class MudClientSession : IAsyncDisposable
 
     private void UpdateInputHiddenState() => IsInputHidden = _echoStateResolver.IsInputHidden;
 
+    public async Task UpdateTerminalSizeAsync(int columns, int rows, CancellationToken cancellationToken = default)
+    {
+        if (columns <= 0 || rows <= 0)
+        {
+            return;
+        }
+
+        _pendingTerminalColumns = columns;
+        _pendingTerminalRows = rows;
+
+        if (!IsConnected)
+        {
+            return;
+        }
+
+        await TrySendTerminalSizeAsync(cancellationToken);
+    }
+
     private void SetErrorState(string statusMessage, string errorMessage)
     {
         ConnectionState = MudConnectionState.Error;
@@ -288,6 +327,75 @@ public sealed class MudClientSession : IAsyncDisposable
     }
 
     private void NotifyChanged() => Changed?.Invoke();
+
+    private async Task EnsureNegotiatedCapabilitiesAsync(CancellationToken cancellationToken)
+    {
+        if (!_gmcpHandshakeSent && _frameParser.OptionState.GetRemoteOptionState(TelnetOptions.Gmcp) == true)
+        {
+            await _telnetClient.SendGmcpCommandAsync(
+                "Core.Hello",
+                JsonSerializer.Serialize(new { client = "sbclient", version = ClientVersion }),
+                cancellationToken);
+            await _telnetClient.SendGmcpCommandAsync(
+                "Core.Supports.Set",
+                JsonSerializer.Serialize(new[] { "Core 1", "Client.Ui 1" }),
+                cancellationToken);
+            await _telnetClient.SendGmcpCommandAsync(
+                "SbClient.Options.Set",
+                JsonSerializer.Serialize(new { prompt_mode = "eor" }),
+                cancellationToken);
+            _gmcpHandshakeSent = true;
+            _logger.LogInformation("Sent GMCP capability handshake for sbclient {ClientVersion}.", ClientVersion);
+        }
+
+        await TrySendTerminalSizeAsync(cancellationToken);
+    }
+
+    private async Task SendManualNegotiationResponsesAsync(
+        IReadOnlyList<byte[]> negotiationResponses,
+        CancellationToken cancellationToken)
+    {
+        foreach (var response in negotiationResponses)
+        {
+            if (response.Length < 3 || response[2] != TelnetOptions.Naws)
+            {
+                continue;
+            }
+
+            await _telnetClient.SendRawAsync(response, cancellationToken);
+        }
+    }
+
+    private async Task TrySendTerminalSizeAsync(CancellationToken cancellationToken)
+    {
+        if (_pendingTerminalColumns is null || _pendingTerminalRows is null)
+        {
+            return;
+        }
+
+        if (_frameParser.OptionState.GetLocalOptionState(TelnetOptions.Naws) != true)
+        {
+            return;
+        }
+
+        var nextSize = (_pendingTerminalColumns.Value, _pendingTerminalRows.Value);
+        if (_lastSentTerminalSize == nextSize)
+        {
+            return;
+        }
+
+        await _telnetClient.SendWindowSizeAsync(nextSize.Item1, nextSize.Item2, cancellationToken);
+        _lastSentTerminalSize = nextSize;
+        _logger.LogDebug("Sent NAWS update: {Columns}x{Rows}.", nextSize.Item1, nextSize.Item2);
+    }
+
+    private static string ResolveClientVersion()
+    {
+        var assembly = typeof(MudClientSession).Assembly;
+        return assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0]
+            ?? assembly.GetName().Version?.ToString(3)
+            ?? "1.0.0";
+    }
 
     private async Task CleanupConnectionAsync(bool awaitReaderTask = true)
     {

@@ -36,7 +36,9 @@ public sealed class MudTelnetClient(ILogger<MudTelnetClient> logger) : IAsyncDis
             .UseLogger(_logger)
             .OnSubmit(IgnoreSubmittedText)
             .OnNegotiation(WriteToNetworkAsync)
+            .AddPlugin<GMCPProtocol>()
             .AddPlugin(new EchoProtocol().OnEchoStateChanged(HandleEchoStateChangedAsync))
+            .AddPlugin<EORProtocol>()
             .AddPlugin<SuppressGoAheadProtocol>()
             .BuildAsync();
     }
@@ -65,6 +67,42 @@ public sealed class MudTelnetClient(ILogger<MudTelnetClient> logger) : IAsyncDis
 
         var payload = Encoding.UTF8.GetBytes(command);
         await _interpreter.SendPromptAsync(payload);
+    }
+
+    public async Task SendGmcpCommandAsync(string package, string payload, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (_interpreter is null)
+        {
+            throw new InvalidOperationException("The telnet interpreter is not attached to a stream.");
+        }
+
+        await _interpreter.SendGMCPCommand(package, payload);
+    }
+
+    public async Task SendWindowSizeAsync(int columns, int rows, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (_interpreter is null)
+        {
+            throw new InvalidOperationException("The telnet interpreter is not attached to a stream.");
+        }
+
+        await _interpreter.SendNAWS((short)columns, (short)rows);
+    }
+
+    public async Task SendRawAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (_interpreter is null)
+        {
+            throw new InvalidOperationException("The telnet interpreter is not attached to a stream.");
+        }
+
+        await _interpreter.WriteToNetworkAsync(data, cancellationToken);
     }
 
     public async ValueTask DisposeAsync()

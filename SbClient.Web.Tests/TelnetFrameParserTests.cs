@@ -40,6 +40,28 @@ public class TelnetFrameParserTests
     }
 
     [Fact]
+    public void Process_SplitsTextAroundPromptBoundaries()
+    {
+        var parser = new TelnetFrameParser();
+        var buffer = new byte[] { (byte)'>', (byte)' ', 255, 239, (byte)'A', (byte)'l', (byte)'e', (byte)'r', (byte)'t' };
+
+        var result = parser.Process(buffer);
+
+        Assert.Collection(
+            result.TextSegments,
+            segment =>
+            {
+                Assert.Equal("> ", segment.Text);
+                Assert.True(segment.EndsWithPromptBoundary);
+            },
+            segment =>
+            {
+                Assert.Equal("Alert", segment.Text);
+                Assert.False(segment.EndsWithPromptBoundary);
+            });
+    }
+
+    [Fact]
     public void Process_AcceptsEchoNegotiationAndRecordsIt()
     {
         var parser = new TelnetFrameParser();
@@ -114,6 +136,28 @@ public class TelnetFrameParserTests
         Assert.Equal(new byte[] { 255, 251, 3 }, result.NegotiationResponses[1]);
         Assert.True(parser.OptionState.GetRemoteOptionState(TelnetOptions.SuppressGoAhead));
         Assert.True(parser.OptionState.GetLocalOptionState(TelnetOptions.SuppressGoAhead));
+    }
+
+    [Fact]
+    public void Process_TracksGmcpEorAndNawsNegotiations()
+    {
+        var parser = new TelnetFrameParser();
+        var buffer = new byte[]
+        {
+            255, 251, TelnetOptions.Gmcp,
+            255, 251, TelnetOptions.EndOfRecord,
+            255, 253, TelnetOptions.Naws
+        };
+
+        var result = parser.Process(buffer);
+
+        Assert.Equal(3, result.Negotiations.Count);
+        Assert.Equal(new byte[] { 255, 253, TelnetOptions.Gmcp }, result.NegotiationResponses[0]);
+        Assert.Equal(new byte[] { 255, 253, TelnetOptions.EndOfRecord }, result.NegotiationResponses[1]);
+        Assert.Equal(new byte[] { 255, 251, TelnetOptions.Naws }, result.NegotiationResponses[2]);
+        Assert.True(parser.OptionState.GetRemoteOptionState(TelnetOptions.Gmcp));
+        Assert.True(parser.OptionState.GetRemoteOptionState(TelnetOptions.EndOfRecord));
+        Assert.True(parser.OptionState.GetLocalOptionState(TelnetOptions.Naws));
     }
 
     [Fact]

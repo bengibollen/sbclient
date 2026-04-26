@@ -18,8 +18,16 @@
             </p>
         </div>
         <div class="mud-status @(Session.ConnectionState == MudConnectionState.Error ? "mud-status--error" : null)">
-            <strong>@Session.ConnectionState</strong>
-            <span>@Session.StatusMessage</span>
+            <div class="mud-status__summary">
+                <strong>@Session.ConnectionState</strong>
+                <span>@Session.StatusMessage</span>
+            </div>
+            @if (Session.IsConnected)
+            {
+                <button class="btn btn-outline-secondary mud-status__action" type="button" @onclick="DisconnectAsync">
+                    Disconnect
+                </button>
+            }
         </div>
     </header>
 
@@ -30,23 +38,26 @@
         </div>
     }
 
-    <section class="mud-card">
-        <h2>Connection</h2>
-        <form class="mud-connection-form" @onsubmit="ConnectAsync">
-            <label>
-                Host
-                <input @bind="host" @bind:event="oninput" disabled="@ConnectDisabled" />
-            </label>
-            <label>
-                Port
-                <input type="number" min="1" max="65535" @bind="port" disabled="@ConnectDisabled" />
-            </label>
-            <div class="mud-connection-actions">
-                <button class="btn btn-primary" type="submit" disabled="@ConnectDisabled">Connect</button>
-                <button class="btn btn-outline-secondary" type="button" @onclick="DisconnectAsync" disabled="@DisconnectDisabled">Disconnect</button>
-            </div>
-        </form>
-    </section>
+    @if (!Session.IsConnected)
+    {
+        <section class="mud-card">
+            <h2>Connection</h2>
+            <form class="mud-connection-form" @onsubmit="ConnectAsync">
+                <label>
+                    Host
+                    <input @bind="host" @bind:event="oninput" disabled="@ConnectDisabled" />
+                </label>
+                <label>
+                    Port
+                    <input type="number" min="1" max="65535" @bind="port" disabled="@ConnectDisabled" />
+                </label>
+                <div class="mud-connection-actions">
+                    <button class="btn btn-primary" type="submit" disabled="@ConnectDisabled">Connect</button>
+                    <button class="btn btn-outline-secondary" type="button" @onclick="DisconnectAsync" disabled="@DisconnectDisabled">Disconnect</button>
+                </div>
+            </form>
+        </section>
+    }
 
     <section class="mud-grid">
         <section class="mud-card mud-card--terminal">
@@ -55,39 +66,42 @@
                 <span>ANSI colors and Nerd Font glyphs render through the browser font stack with a bundled FiraCode Nerd Font fallback.</span>
             </div>
 
-            <div class="mud-terminal" data-terminal-scroll role="log" aria-live="polite" @ref="terminalElement">
-                <div class="mud-terminal__content" data-terminal-content>
-                    @foreach (var line in Session.Lines)
-                    {
-                        <div class="mud-terminal__line">
-                            @if (line.Spans.Count == 0)
-                            {
-                                <span>&nbsp;</span>
-                            }
-                            else
-                            {
-                                @foreach (var span in line.Spans)
+            <div class="mud-terminal-surface">
+                <div class="mud-terminal" data-terminal-scroll role="log" aria-live="polite" @ref="terminalElement" @onclick="FocusCommandInputAsync">
+                    <div class="mud-terminal__content" data-terminal-content>
+                        @foreach (var line in Session.Lines)
+                        {
+                            <div class="mud-terminal__line">
+                                @if (line.Spans.Count == 0)
                                 {
-                                    <span style="@BuildSpanStyle(span.Style)">@span.Text</span>
+                                    <span>&nbsp;</span>
                                 }
-                            }
-                        </div>
-                    }
-                    <div class="mud-terminal__end" data-terminal-end aria-hidden="true"></div>
+                                else
+                                {
+                                    @foreach (var span in line.Spans)
+                                    {
+                                        <span style="@BuildSpanStyle(span.Style)">@span.Text</span>
+                                    }
+                                }
+                            </div>
+                        }
+                        <div class="mud-terminal__end" data-terminal-end aria-hidden="true"></div>
+                    </div>
                 </div>
-            </div>
 
-            <form class="mud-command-form" @onsubmit="SendCommandAsync">
-                <input
-                    class="mud-command-form__input"
-                    type="@(Session.IsInputHidden ? "password" : "text")"
-                    placeholder="@(Session.IsInputHidden ? "Hidden input enabled" : "Type a command and press Enter")"
-                    @bind="command"
-                    @bind:event="oninput"
-                    @onkeydown="HandleCommandKeyDown"
-                    disabled="@SendDisabled" />
-                <button class="btn btn-primary" type="submit" disabled="@SendDisabled">Send</button>
-            </form>
+                <form class="mud-command-form" @onsubmit="SendCommandAsync">
+                    <input
+                        class="mud-command-form__input"
+                        type="@(Session.IsInputHidden ? "password" : "text")"
+                        placeholder="@(Session.IsInputHidden ? "Hidden input enabled" : "Type a command and press Enter")"
+                        @bind="command"
+                        @bind:event="oninput"
+                        @onkeydown="HandleCommandKeyDown"
+                        @ref="commandInputElement"
+                        disabled="@SendDisabled" />
+                    <button class="btn btn-primary mud-command-form__send" type="submit" disabled="@SendDisabled">Send</button>
+                </form>
+            </div>
         </section>
 
         <section class="mud-card mud-card--media">
@@ -148,11 +162,16 @@
     private int port;
     private string command = string.Empty;
     private readonly List<string> commandHistory = [];
+    private ElementReference commandInputElement;
     private ElementReference terminalElement;
     private IJSObjectReference? terminalModule;
+    private DotNetObjectReference<Home>? terminalComponentReference;
+    private bool syncCommandInput;
     private bool syncTerminalScroll = true;
     private int? commandHistoryIndex;
     private string pendingCommandDraft = string.Empty;
+    private bool lastInputHiddenState;
+    private (int Columns, int Rows)? observedTerminalSize;
     private bool ConnectDisabled => Session.IsConnected || Session.IsConnecting;
     private bool DisconnectDisabled => !Session.IsConnected && !Session.IsConnecting;
     private bool SendDisabled => !Session.IsConnected;
@@ -176,12 +195,15 @@
         {
             try
             {
+                await terminalModule.InvokeVoidAsync("disposeTerminalObserver", terminalElement);
                 await terminalModule.DisposeAsync();
             }
             catch (JSDisconnectedException)
             {
             }
         }
+
+        terminalComponentReference?.Dispose();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -189,6 +211,8 @@
         if (firstRender)
         {
             terminalModule = await JS.InvokeAsync<IJSObjectReference>("import", "./Components/Pages/Home.razor.js");
+            terminalComponentReference = DotNetObjectReference.Create(this);
+            await terminalModule.InvokeVoidAsync("observeTerminalSize", terminalElement, terminalComponentReference);
         }
 
         if (terminalModule is not null && (firstRender || syncTerminalScroll))
@@ -196,6 +220,25 @@
             syncTerminalScroll = false;
             await terminalModule.InvokeVoidAsync("syncTerminalScroll", terminalElement);
         }
+
+        if (terminalModule is not null && syncCommandInput)
+        {
+            syncCommandInput = false;
+            await terminalModule.InvokeVoidAsync("syncCommandInput", commandInputElement, command);
+        }
+    }
+
+    [JSInvokable]
+    public async Task HandleTerminalSizeChanged(int columns, int rows)
+    {
+        var nextSize = (columns, rows);
+        if (observedTerminalSize == nextSize)
+        {
+            return;
+        }
+
+        observedTerminalSize = nextSize;
+        await Session.UpdateTerminalSizeAsync(columns, rows);
     }
 
     private async Task ConnectAsync()
@@ -223,20 +266,39 @@
 
     private Task HandleCommandKeyDown(KeyboardEventArgs args)
     {
-        if (args.Key == "ArrowUp")
+        if (args.Key is "ArrowUp" or "Up")
         {
             NavigateCommandHistory(-1);
+            syncCommandInput = true;
         }
-        else if (args.Key == "ArrowDown")
+        else if (args.Key is "ArrowDown" or "Down")
         {
             NavigateCommandHistory(1);
+            syncCommandInput = true;
         }
 
         return Task.CompletedTask;
     }
 
+    private async Task FocusCommandInputAsync()
+    {
+        if (SendDisabled)
+        {
+            return;
+        }
+
+        await commandInputElement.FocusAsync(preventScroll: true);
+    }
+
     private void HandleSessionChanged()
     {
+        if (Session.IsInputHidden && !lastInputHiddenState)
+        {
+            commandHistoryIndex = null;
+            pendingCommandDraft = string.Empty;
+        }
+
+        lastInputHiddenState = Session.IsInputHidden;
         syncTerminalScroll = true;
         _ = InvokeAsync(StateHasChanged);
     }

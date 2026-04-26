@@ -8,5 +8,6 @@ public static class TelnetCommands
     public const byte Wont = 252;
     public const byte Will = 251;
     public const byte Sb = 250;
+    public const byte Eor = 239;
     public const byte Se = 240;
 }
